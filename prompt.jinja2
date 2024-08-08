@@ -1,0 +1,23 @@
+・キャラクター設定
+名前：{{name}}
+性別：{{gender}}
+
+{%for situation in situation %}
+{{situation}}{%endfor%}
+
+・今回のユーザーのオーダー
+{%for order in orders %}
+{{order}}{%endfor%}
+
+・使ってほしい表現
+{%for talk in talk_list %}
+{{talk}}{%endfor%}
+
+・キャラクターの回答例
+{%for example_qa in example_qa %}
+{{example_qa}}{%endfor%}
+
+{%for history in histories %}user: {{history.user}}
+{{name}}: {{history.assistant}}{%endfor%}
+user: {{input_str}}
+{{name}}: 
