@@ -3,6 +3,7 @@ character_settings
 models
 venv
 last_loaded.json
+*.csv
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
