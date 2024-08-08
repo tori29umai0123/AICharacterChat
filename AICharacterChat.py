@@ -2,6 +2,8 @@ import gradio as gr
 from jinja2 import Template
 from llama_cpp import Llama
 import os
+import sys
+import time
 import configparser
 import json
 import csv
@@ -11,13 +13,20 @@ import socket
 LAST_LOADED_FILE = 'last_loaded.json'
 DEFAULT_MODEL = 'Ninja-v1-RP-expressive-v2_Q4_K_M.gguf'
 
+# ビルドしているかしていないかでパスを変更
+if getattr(sys, 'frozen', False):
+    path = os.path.dirname(sys.executable)
+else:
+    path = os.path.dirname(os.path.abspath(__file__))
+
 def save_last_loaded(filename):
-    with open(LAST_LOADED_FILE, 'w') as f:
+    with open(os.path.join(path, LAST_LOADED_FILE), 'w') as f:
         json.dump({'last_loaded': filename}, f)
 
 def get_last_loaded():
-    if os.path.exists(LAST_LOADED_FILE):
-        with open(LAST_LOADED_FILE, 'r') as f:
+    file_path = os.path.join(path, LAST_LOADED_FILE)
+    if os.path.exists(file_path):
+        with open(file_path, 'r') as f:
             data = json.load(f)
             return data.get('last_loaded')
     return None
@@ -36,11 +45,11 @@ def save_settings_to_ini(settings, filename):
         'example_qa': '\n\t'.join(settings['example_qa']),
         'model': settings['model']
     }
-    with open(os.path.join('character_settings', filename), 'w', encoding='utf-8') as configfile:
+    with open(os.path.join(path, 'character_settings', filename), 'w', encoding='utf-8') as configfile:
         config.write(configfile)
 
 def load_settings_from_ini(filename):
-    file_path = os.path.join('character_settings', filename)
+    file_path = os.path.join(path, 'character_settings', filename)
     if not os.path.exists(file_path):
         return None
     
@@ -75,12 +84,49 @@ def get_ip_address():
         s.close()
     return IP
 
+def is_port_in_use(port):
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        return s.connect_ex(('localhost', port)) == 0
+
+def find_available_port(starting_port):
+    port = starting_port
+    while is_port_in_use(port):
+        print(f"Port {port} is in use, trying next one.")
+        port += 1
+    return port
+
+
+def list_log_files():
+    logs_dir = os.path.join(path, "logs")
+    if not os.path.exists(logs_dir):
+        return []
+    return [f for f in os.listdir(logs_dir) if f.endswith('.csv')]
+
+def load_chat_log(file_name):
+    file_path = os.path.join(path, "logs", file_name)
+    chat_history = []
+    with open(file_path, 'r', encoding='utf-8') as csvfile:
+        reader = csv.reader(csvfile)
+        next(reader)  # Skip header
+        for row in reader:
+            if len(row) == 2:
+                role, message = row
+                if role == "User":
+                    chat_history.append([message, None])
+                elif role == "Assistant":
+                    if chat_history and chat_history[-1][1] is None:
+                        chat_history[-1][1] = message
+                    else:
+                        chat_history.append([None, message])
+    return chat_history
+
+
 class LlamaCppAdapter:
     def __init__(self, model_path, n_ctx=10000):
         print(f"Initializing model: {model_path}")
         self.llama = Llama(model_path=model_path, n_ctx=n_ctx, n_gpu_layers=-1)
 
-    def generate(self, prompt, max_new_tokens=10000, temperature=0.5, top_p=0.7, top_k=80, stop=["<END>"]):
+    def generate(self, prompt, max_new_tokens=10000, temperature=0.5, top_p=0.7, top_k=80, stop=["User:", "<END>"]):
         return self._generate(prompt, max_new_tokens, temperature, top_p, top_k, stop)
 
     def _generate(self, prompt: str, max_new_tokens: int, temperature: float, top_p: float, top_k: int, stop: list):
@@ -94,18 +140,6 @@ class LlamaCppAdapter:
             repeat_penalty=1.2,
         )
 
-def is_port_in_use(port):
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        return s.connect_ex(('localhost', port)) == 0
-
-def find_available_port(starting_port):
-    port = starting_port
-    while is_port_in_use(port):
-        print(f"Port {port} is in use, trying next one.")
-        port += 1
-    return port
-
-
 class CharacterMaker:
     def __init__(self):
         self.llama = None
@@ -114,18 +148,20 @@ class CharacterMaker:
         self.load_or_create_settings()
 
     def load_or_create_settings(self):
-        if not os.path.exists('character_settings'):
-            os.makedirs('character_settings')
+        character_settings_path = os.path.join(path, 'character_settings')
+        if not os.path.exists(character_settings_path):
+            os.makedirs(character_settings_path)
         
         last_loaded = get_last_loaded()
-        if last_loaded and os.path.exists(os.path.join('character_settings', last_loaded)):
+        if last_loaded and os.path.exists(os.path.join(character_settings_path, last_loaded)):
             self.settings = load_settings_from_ini(last_loaded)
         else:
-            ini_files = [f for f in os.listdir('character_settings') if f.endswith('.ini')]
+            ini_files = [f for f in os.listdir(character_settings_path) if f.endswith('.ini')]
             if ini_files:
                 last_loaded = ini_files[0]
                 self.settings = load_settings_from_ini(last_loaded)
             else:
+                # Default settings (unchanged)
                 self.settings = {
                     "name": "ナツ",
                     "gender": "女性",
@@ -171,14 +207,19 @@ class CharacterMaker:
         save_last_loaded(last_loaded)
         self.set_model(self.settings['model'])
         
-        character_files = [f for f in os.listdir('character_settings') if f.endswith('.ini')]
+        character_files = [f for f in os.listdir(character_settings_path) if f.endswith('.ini')]
         if last_loaded not in character_files:
             character_files.append(last_loaded)
         return character_files
 
     def set_model(self, model_name):
-        my_path = os.path.dirname(os.path.abspath(__file__))
-        model_path = os.path.join(my_path, "models", model_name)
+        # ビルドしているかしていないかでパスを変更
+        if getattr(sys, 'frozen', False):
+            model_path = os.path.join(os.path.dirname(path), "AICharacterChat", "models", model_name)
+        else:
+            model_path = os.path.join(path, "models", model_name)
+
+       
         self.llama = LlamaCppAdapter(model_path)
 
     def make(self, input_str: str):
@@ -246,7 +287,8 @@ class CharacterMaker:
 character_maker = CharacterMaker()
 
 def update_character_list():
-    character_files = [f for f in os.listdir('character_settings') if f.endswith('.ini')]
+    character_settings_path = os.path.join(path, 'character_settings')
+    character_files = [f for f in os.listdir(character_settings_path) if f.endswith('.ini')]
     current_file = get_last_loaded()
     if current_file and current_file not in character_files:
         character_files.append(current_file)
@@ -281,11 +323,14 @@ def update_settings(name, gender, situation, orders, talk_list, example_qa, mode
 def chat_with_character(message, history):
     character_maker.history = [{"user": h[0], "assistant": h[1]} for h in history]
     response = character_maker.make(message)
-    return response
+    for i in range(len(response)):
+        time.sleep(0.3)
+        yield response[: i+1]
 
 def clear_chat():
     character_maker.reset()
     return []
+
 
 def load_character_settings(filename):
     print(f"Received filename: {filename}, Type: {type(filename)}")
@@ -316,14 +361,21 @@ def save_chat_log():
     current_ini = get_last_loaded() or "default"
     filename = f"{current_ini.replace('.ini', '')}_{current_time}.csv"
     
-    with open(filename, 'w', newline='', encoding='utf-8') as csvfile:
+    # Create logs directory if it doesn't exist
+    logs_dir = os.path.join(path, "logs")
+    if not os.path.exists(logs_dir):
+        os.makedirs(logs_dir)
+    
+    file_path = os.path.join(logs_dir, filename)
+    
+    with open(file_path, 'w', newline='', encoding='utf-8') as csvfile:
         writer = csv.writer(csvfile)
         writer.writerow(["Role", "Message"])
         for entry in character_maker.history:
             writer.writerow(["User", entry["user"]])
             writer.writerow(["Assistant", entry["assistant"]])
     
-    return f"チャットログが {filename} に保存されました。"
+    return f"チャットログが {file_path} に保存されました。"
 
 # カスタムCSS
 custom_css = """
@@ -343,6 +395,8 @@ with gr.Blocks(css=custom_css) as iface:
             chatbot=chatbot,
             textbox=gr.Textbox(placeholder="メッセージを入力してください...", container=False, scale=7),
             theme="soft",
+            submit_btn="送信",
+            stop_btn="停止",
             retry_btn="もう一度生成",
             undo_btn="前のメッセージを取り消す",
             clear_btn="チャットをクリア",
@@ -375,7 +429,10 @@ with gr.Blocks(css=custom_css) as iface:
         example_qa_input = gr.Textbox(label="Q&A", value="\n".join(character_maker.settings["example_qa"]), lines=5)
         
         gr.Markdown("## モデル設定")
-        model_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models")
+        if getattr(sys, 'frozen', False):
+            model_dir  = os.path.join(os.path.dirname(path), "AICharacterChat", "models")
+        else:
+            model_dir  = os.path.join(path, "models")
         model_files = [f for f in os.listdir(model_dir) if f.endswith('.gguf')]
         model_dropdown = gr.Dropdown(label="モデル選択", choices=model_files, value=character_maker.settings["model"])
         
@@ -420,6 +477,47 @@ with gr.Blocks(css=custom_css) as iface:
             outputs=[update_output, name_input, gender_input, situation_input, orders_input, talk_input, example_qa_input, model_dropdown, character_dropdown, character_dropdown, filename_input]
         )
 
+    with gr.Tab("ログ閲覧"):
+        gr.Markdown("## チャットログ閲覧")
+        log_file_dropdown = gr.Dropdown(label="ログファイル選択", choices=list_log_files())
+        refresh_log_list_button = gr.Button("ログファイルリストを更新")
+        log_mode_indicator = gr.Markdown("現在の状態: 通常チャットモード")
+        
+        def update_log_dropdown():
+            return gr.update(choices=list_log_files())
+
+        def load_and_display_chat_log(file_name):
+            chat_history = load_chat_log(file_name)
+            return (
+                gr.update(value=chat_history),
+                gr.update(interactive=False),
+                "現在の状態: ログ閲覧モード（チャットは無効）"
+            )
+
+        def reset_chat_mode():
+            return (
+                gr.update(value=[]),
+                gr.update(interactive=True),
+                "現在の状態: 通常チャットモード"
+            )
+
+        refresh_log_list_button.click(
+            update_log_dropdown,
+            outputs=[log_file_dropdown]
+        )
+
+        log_file_dropdown.change(
+            load_and_display_chat_log,
+            inputs=[log_file_dropdown],
+            outputs=[chatbot, chat_interface.textbox, log_mode_indicator]
+        )
+
+        reset_chat_button = gr.Button("通常チャットモードに戻る")
+        reset_chat_button.click(
+            reset_chat_mode,
+            outputs=[chatbot, chat_interface.textbox, log_mode_indicator]
+        )
+
 if __name__ == "__main__":
     ip_address = get_ip_address()
     starting_port = 7860
@@ -429,6 +527,7 @@ if __name__ == "__main__":
         server_name='0.0.0.0', 
         server_port=port,
         share=False,
-        allowed_paths=["models", "character_settings"],
-        favicon_path="custom.html"
+        allowed_paths=[os.path.join(path, "models"), os.path.join(path, "character_settings")],
+        favicon_path=os.path.join(path, "custom.html")
     )
+    
