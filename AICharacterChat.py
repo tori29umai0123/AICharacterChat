@@ -111,15 +111,23 @@ def load_chat_log(file_name):
         for row in reader:
             if len(row) == 2:
                 role, message = row
-                if role == "User":
+                if role == "user":
                     chat_history.append([message, None])
-                elif role == "Assistant":
+                elif role == "assistant":
                     if chat_history and chat_history[-1][1] is None:
                         chat_history[-1][1] = message
                     else:
                         chat_history.append([None, message])
     return chat_history
 
+def resume_chat_from_log(chat_history):
+    # チャットボットのUIを更新
+    chatbot_ui = gr.update(value=chat_history)
+    
+    # LLMの履歴を更新
+    character_maker.history = [{"user": h[0], "assistant": h[1]} for h in chat_history if h[0] is not None and h[1] is not None]
+    
+    return chatbot_ui, "チャットログから会話を再開しました。"
 
 class LlamaCppAdapter:
     def __init__(self, model_path, n_ctx=10000):
@@ -372,8 +380,8 @@ def save_chat_log():
         writer = csv.writer(csvfile)
         writer.writerow(["Role", "Message"])
         for entry in character_maker.history:
-            writer.writerow(["User", entry["user"]])
-            writer.writerow(["Assistant", entry["assistant"]])
+            writer.writerow(["user", entry["user"]])
+            writer.writerow(["assistant", entry["assistant"]])
     
     return f"チャットログが {file_path} に保存されました。"
 
@@ -387,136 +395,134 @@ custom_css = """
 
 # Gradioインターフェースの設定  
 with gr.Blocks(css=custom_css) as iface:
-    chatbot = gr.Chatbot(elem_id="chatbot")
-    
-    with gr.Tab("チャット"):
-        chat_interface = gr.ChatInterface(
-            chat_with_character,
-            chatbot=chatbot,
-            textbox=gr.Textbox(placeholder="メッセージを入力してください...", container=False, scale=7),
-            theme="soft",
-            submit_btn="送信",
-            stop_btn="停止",
-            retry_btn="もう一度生成",
-            undo_btn="前のメッセージを取り消す",
-            clear_btn="チャットをクリア",
-        )
-        save_log_button = gr.Button("チャットログを保存")
-        save_log_output = gr.Textbox(label="保存状態")
-        save_log_button.click(
-            save_chat_log,
-            outputs=[save_log_output]
-        )
-    
-    with gr.Tab("設定"):
-        gr.Markdown("## キャラクター設定")
-        character_files = character_maker.load_or_create_settings()
-        character_dropdown = gr.Dropdown(
-            label="キャラクター選択",
-            choices=character_files,
-            value=get_last_loaded(),
-            allow_custom_value=True,
-            interactive=True
-        )
-        refresh_character_list_button = gr.Button("キャラクターリストを更新")
-        load_character_output = gr.Textbox(label="キャラクター読み込み状態")
-
-        name_input = gr.Textbox(label="名前", value=character_maker.settings["name"])
-        gender_input = gr.Textbox(label="性別", value=character_maker.settings["gender"])
-        situation_input = gr.Textbox(label="状況設定", value="\n".join(character_maker.settings["situation"]), lines=5)
-        orders_input = gr.Textbox(label="指示", value="\n".join(character_maker.settings["orders"]), lines=5)
-        talk_input = gr.Textbox(label="語彙リスト", value="\n".join(character_maker.settings["talk_list"]), lines=5)
-        example_qa_input = gr.Textbox(label="Q&A", value="\n".join(character_maker.settings["example_qa"]), lines=5)
+    tabs = gr.Tabs()
+    with tabs:       
+        with gr.Tab("チャット", id="chat_tab") as chat_tab:
+            chatbot = gr.Chatbot(elem_id="chatbot")
+            chat_interface = gr.ChatInterface(
+                chat_with_character,
+                chatbot=chatbot,
+                textbox=gr.Textbox(placeholder="メッセージを入力してください...", container=False, scale=7),
+                theme="soft",
+                submit_btn="送信",
+                stop_btn="停止",
+                retry_btn="もう一度生成",
+                undo_btn="前のメッセージを取り消す",
+                clear_btn="チャットをクリア",
+            )
+            save_log_button = gr.Button("チャットログを保存")
+            save_log_output = gr.Textbox(label="保存状態")
+            save_log_button.click(
+                save_chat_log,
+                outputs=[save_log_output]
+            )
+            
         
-        gr.Markdown("## モデル設定")
-        if getattr(sys, 'frozen', False):
-            model_dir  = os.path.join(os.path.dirname(path), "AICharacterChat", "models")
-        else:
-            model_dir  = os.path.join(path, "models")
-        model_files = [f for f in os.listdir(model_dir) if f.endswith('.gguf')]
-        model_dropdown = gr.Dropdown(label="モデル選択", choices=model_files, value=character_maker.settings["model"])
-        
-        # 現在読み込んでいる .ini ファイル名を取得
-        current_ini = get_last_loaded() or "character"
-        # .ini 拡張子を除去
-        current_ini_without_extension = os.path.splitext(current_ini)[0]
+        with gr.Tab("設定"):
+            gr.Markdown("## キャラクター設定")
+            character_files = character_maker.load_or_create_settings()
+            character_dropdown = gr.Dropdown(
+                label="キャラクター選択",
+                choices=character_files,
+                value=get_last_loaded(),
+                allow_custom_value=True,
+                interactive=True
+            )
+            refresh_character_list_button = gr.Button("キャラクターリストを更新")
+            load_character_output = gr.Textbox(label="キャラクター読み込み状態")
 
-        filename_input = gr.Textbox(label="保存ファイル名 (.iniは自動で付加されます)", value=current_ini_without_extension)
-        
-        update_button = gr.Button("設定を更新")
-        update_output = gr.Textbox(label="更新状態")
+            name_input = gr.Textbox(label="名前", value=character_maker.settings["name"])
+            gender_input = gr.Textbox(label="性別", value=character_maker.settings["gender"])
+            situation_input = gr.Textbox(label="状況設定", value="\n".join(character_maker.settings["situation"]), lines=5)
+            orders_input = gr.Textbox(label="指示", value="\n".join(character_maker.settings["orders"]), lines=5)
+            talk_input = gr.Textbox(label="語彙リスト", value="\n".join(character_maker.settings["talk_list"]), lines=5)
+            example_qa_input = gr.Textbox(label="Q&A", value="\n".join(character_maker.settings["example_qa"]), lines=5)
+            
+            gr.Markdown("## モデル設定")
+            if getattr(sys, 'frozen', False):
+                model_dir  = os.path.join(os.path.dirname(path), "AICharacterChat", "models")
+            else:
+                model_dir  = os.path.join(path, "models")
+            model_files = [f for f in os.listdir(model_dir) if f.endswith('.gguf')]
+            model_dropdown = gr.Dropdown(label="モデル選択", choices=model_files, value=character_maker.settings["model"])
+            
+            # 現在読み込んでいる .ini ファイル名を取得
+            current_ini = get_last_loaded() or "character"
+            # .ini 拡張子を除去
+            current_ini_without_extension = os.path.splitext(current_ini)[0]
 
-        character_dropdown.change(
-            load_character_settings,
-            inputs=[character_dropdown],
-            outputs=[
-                load_character_output, 
-                name_input, 
-                gender_input, 
-                situation_input, 
-                orders_input, 
-                talk_input, 
-                example_qa_input, 
-                model_dropdown, 
-                filename_input
-            ]
-        )
+            filename_input = gr.Textbox(label="保存ファイル名 (.iniは自動で付加されます)", value=current_ini_without_extension)
+            
+            update_button = gr.Button("設定を更新")
+            update_output = gr.Textbox(label="更新状態")
 
-        def update_dropdown():
-            choices, value = update_character_list()
-            return gr.update(choices=choices, value=value)
-        
-        refresh_character_list_button.click(
-            update_dropdown,
-            outputs=[character_dropdown]
-        )
-
-        update_button.click(
-            update_settings,
-            inputs=[name_input, gender_input, situation_input, orders_input, talk_input, example_qa_input, model_dropdown, filename_input],
-            outputs=[update_output, name_input, gender_input, situation_input, orders_input, talk_input, example_qa_input, model_dropdown, character_dropdown, character_dropdown, filename_input]
-        )
-
-    with gr.Tab("ログ閲覧"):
-        gr.Markdown("## チャットログ閲覧")
-        log_file_dropdown = gr.Dropdown(label="ログファイル選択", choices=list_log_files())
-        refresh_log_list_button = gr.Button("ログファイルリストを更新")
-        log_mode_indicator = gr.Markdown("現在の状態: 通常チャットモード")
-        
-        def update_log_dropdown():
-            return gr.update(choices=list_log_files())
-
-        def load_and_display_chat_log(file_name):
-            chat_history = load_chat_log(file_name)
-            return (
-                gr.update(value=chat_history),
-                gr.update(interactive=False),
-                "現在の状態: ログ閲覧モード（チャットは無効）"
+            character_dropdown.change(
+                load_character_settings,
+                inputs=[character_dropdown],
+                outputs=[
+                    load_character_output, 
+                    name_input, 
+                    gender_input, 
+                    situation_input, 
+                    orders_input, 
+                    talk_input, 
+                    example_qa_input, 
+                    model_dropdown, 
+                    filename_input
+                ]
             )
 
-        def reset_chat_mode():
-            return (
-                gr.update(value=[]),
-                gr.update(interactive=True),
-                "現在の状態: 通常チャットモード"
+            def update_dropdown():
+                choices, value = update_character_list()
+                return gr.update(choices=choices, value=value)
+            
+            refresh_character_list_button.click(
+                update_dropdown,
+                outputs=[character_dropdown]
             )
 
-        refresh_log_list_button.click(
-            update_log_dropdown,
-            outputs=[log_file_dropdown]
-        )
+            update_button.click(
+                update_settings,
+                inputs=[name_input, gender_input, situation_input, orders_input, talk_input, example_qa_input, model_dropdown, filename_input],
+                outputs=[update_output, name_input, gender_input, situation_input, orders_input, talk_input, example_qa_input, model_dropdown, character_dropdown, character_dropdown, filename_input]
+            )
 
-        log_file_dropdown.change(
-            load_and_display_chat_log,
-            inputs=[log_file_dropdown],
-            outputs=[chatbot, chat_interface.textbox, log_mode_indicator]
-        )
+        with gr.Tab("ログ閲覧", id="log_view_tab") as log_view_tab:
+            chatbot_read = gr.Chatbot(elem_id="chatbot_read")
+            gr.Markdown("## チャットログ閲覧")
+            log_file_dropdown = gr.Dropdown(label="ログファイル選択", choices=list_log_files())
+            refresh_log_list_button = gr.Button("ログファイルリストを更新")
+            resume_chat_button = gr.Button("選択したログからチャットを再開")
+            resume_status = gr.Textbox(label="再開状態")
+            
+            def update_log_dropdown():
+                return gr.update(choices=list_log_files())
 
-        reset_chat_button = gr.Button("通常チャットモードに戻る")
-        reset_chat_button.click(
-            reset_chat_mode,
-            outputs=[chatbot, chat_interface.textbox, log_mode_indicator]
-        )
+            def load_and_display_chat_log(file_name):
+                chat_history = load_chat_log(file_name)
+                return gr.update(value=chat_history)
+
+            refresh_log_list_button.click(
+                update_log_dropdown,
+                outputs=[log_file_dropdown]
+            )
+
+            log_file_dropdown.change(
+                load_and_display_chat_log,
+                inputs=[log_file_dropdown],
+                outputs=[chatbot_read]
+            )
+
+            def resume_chat_and_switch_tab(chat_history):
+                chatbot_ui, status = resume_chat_from_log(chat_history)
+                return chatbot_ui, status, gr.update(selected="chat_tab")
+
+            resume_chat_button.click(
+                resume_chat_and_switch_tab,
+                inputs=[chatbot_read],
+                outputs=[chatbot, resume_status, tabs]
+            )
+
 
 if __name__ == "__main__":
     ip_address = get_ip_address()
