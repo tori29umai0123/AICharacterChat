@@ -127,7 +127,7 @@ def resume_chat_from_log(chat_history):
     # LLMの履歴を更新
     character_maker.history = [{"user": h[0], "assistant": h[1]} for h in chat_history if h[0] is not None and h[1] is not None]
     
-    return chatbot_ui, "チャットログから会話を再開しました。"
+    return chatbot_ui
 
 class LlamaCppAdapter:
     def __init__(self, model_path, n_ctx=10000):
@@ -493,7 +493,6 @@ with gr.Blocks(css=custom_css) as iface:
             log_file_dropdown = gr.Dropdown(label="ログファイル選択", choices=list_log_files())
             refresh_log_list_button = gr.Button("ログファイルリストを更新")
             resume_chat_button = gr.Button("選択したログからチャットを再開")
-            resume_status = gr.Textbox(label="再開状態")
             
             def update_log_dropdown():
                 return gr.update(choices=list_log_files())
@@ -515,12 +514,12 @@ with gr.Blocks(css=custom_css) as iface:
 
             def resume_chat_and_switch_tab(chat_history):
                 chatbot_ui, status = resume_chat_from_log(chat_history)
-                return chatbot_ui, status, gr.update(selected="chat_tab")
+                return chatbot_ui, gr.update(selected="chat_tab")
 
             resume_chat_button.click(
                 resume_chat_and_switch_tab,
                 inputs=[chatbot_read],
-                outputs=[chatbot, resume_status, tabs]
+                outputs=[chatbot, tabs]
             )
 
 
