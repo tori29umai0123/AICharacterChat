@@ -2,22 +2,31 @@
 名前：{{name}}
 性別：{{gender}}
 
-{%for situation in situation %}
-{{situation}}{%endfor%}
+・状況設定
+{% for situation_item in situation %}
+{{situation_item}}
+{% endfor %}
 
 ・今回のユーザーのオーダー
-{%for order in orders %}
-{{order}}{%endfor%}
+{% for order_item in orders %}
+{{order_item}}
+{% endfor %}
 
 ・使ってほしい表現
-{%for talk in talk_list %}
-{{talk}}{%endfor%}
+{% for talk_item in talk_list %}
+{{talk_item}}
+{% endfor %}
 
 ・キャラクターの回答例
-{%for example_qa in example_qa %}
-{{example_qa}}{%endfor%}
+{% for qa in example_qa %}
+{{qa}}
+{% endfor %}
 
-{%for history in histories %}user: {{history.user}}
-{{name}}: {{history.assistant}}{%endfor%}
-user: {{input_str}}
-{{name}}: 
+・会話履歴
+{% for history in histories %}
+user: {{history.user}}
+assistant: {{history.assistant}}
+{% endfor %}
+
+user:{{input_str}}
+assistant:
